@@ -7,6 +7,28 @@ I don't know why... But apparently someone needs this.
 
 TBD
 
+## Requirement
+
+1. required python packages:
+
+    - mistune (for converting markdown to html)
+    
+        ```bash
+        pip install mistune
+        ```
+
+    - beautifulsoup (for parsing converted html)
+
+        ```bash
+        pip install beautifulsoup4
+        ```
+
+    - translate-api (for translating English into other languages)
+
+        ```bash
+        pip install translators
+        ```
+
 ## Usage
 
 ```bash
