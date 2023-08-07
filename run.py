@@ -2,13 +2,14 @@
 import subprocess
 import shutil
 import os
+from itertools import chain
 from argparse import ArgumentParser
 from pathlib import Path
 
 import mistune
 from bs4 import BeautifulSoup
 
-from renderers import ClippyDocRenderer
+from renderers import ClippyDocRenderer, RustcDocRenderer
 from utils import err, ensure_cmd, ensure_path
 
 class LintInfo:
@@ -42,8 +43,8 @@ class LintInfo:
 
 
     def gather_lint_info(self):
-        self.clippy_lints_info()
-        pass
+        self.content += self.clippy_lints_info()
+        self.content += self.rustc_lints_info()
 
 
     def clippy_lints_info(self):
@@ -60,18 +61,50 @@ class LintInfo:
             "src", "tools", "clippy", "clippy_lints", "src"
         )
         ensure_path(clippy_lints_path, "the rust source code might be corrupted")
-        rs_files = Path(clippy_lints_path).glob("**/*.rs")
-
-        try:
-            for file in rs_files:
-                print(file)
-        except Exception as ex:
-            err(f"unknown exception caught during fetching clippy lints info: {ex}")
+        # filter out utils directory, which does not contain public lints
+        rs_files = [
+            f for f in Path(clippy_lints_path).glob("**/*.rs")
+            if "utils" not in os.path.dirname(f)
+        ]
+        info_details = []
+        for file in rs_files:
+            info_details += _lint_info_from_file_(file, True)
+        
+        return info_details
 
 
     def rustc_lints_info(self):
-        pass
+        """
+        Retrive all rustc lints information.
 
+        rustc lints declaration stores under two different locations:
+        - `rust/compiler/rustc_lint/src`
+        - `rust/compiler/rustc_lint_defs/src`
+        all its left to do is (maybe) entering these directories and look for
+        `declare_lint!` blocks, then extracting the doc comment as markdown docs,
+        along with the lint name after the doc.
+        """
+        lints_path_a = os.path.join(self.rust_dir, "compiler", "rustc_lint", "src")
+        lints_path_b = os.path.join(self.rust_dir, "compiler", "rustc_lint_defs", "src")
+        ensure_path(lints_path_a, "the rust source code might be corrupted")
+        ensure_path(lints_path_b, "the rust source code might be corrupted")
+        rs_files = chain(Path(lints_path_a).glob("**/*.rs"), Path(lints_path_b).glob("**/*.rs"))
+        info_details = []
+        for file in rs_files:
+            info_details += _lint_info_from_file_(file, False)
+        return info_details
+
+
+def _lint_info_from_file_(file, is_clippy) -> list:
+    try:
+        details = []
+        with open(file, "r", encoding="utf8") as sf:
+            src_content = sf.read()
+            details = extract_lint_info_detail(src_content, is_clippy)
+        print("{} lints detected from '{}'".format(len(details), file))
+        return details
+    except Exception as ex:
+        err(f"unknown error: {ex}")
 
 class LintInfoDetail:
     def __init__(self, name: str, summary: str, example: str, instead: str, explanation: str):
@@ -82,11 +115,12 @@ class LintInfoDetail:
         self.explanation = explanation
 
 
-def extract_lint_doc_and_name(text: str, start: str) -> (str, str):
+def extract_lint_info_detail(text: str, is_clippy: bool) -> list:
     res = []
     extraction_started = False
-    doc_list = []
+    doc_list = [""]
     lint_name = ""
+    start = "declare_clippy_lint!" if is_clippy else "declare_lint!"
     for line in text.split("\n"):
         trimmed = line.strip()
         if not trimmed:
@@ -95,8 +129,15 @@ def extract_lint_doc_and_name(text: str, start: str) -> (str, str):
             extraction_started = True
         elif extraction_started and trimmed.startswith("}"):
             extraction_started = False
-            res.append(("\n".join(doc_list), lint_name.lower()))
-            doc_list = []
+            if len(doc_list) > 1 and doc_list[1] != "### What it does":
+                doc_list[0] = "### Summary"
+            # already have enough info we need for this lint, parse it then add to result
+            doc = "\n".join(doc_list)
+            name = lint_name.lower() if not is_clippy else "clippy::{}".format(lint_name.lower())
+            info = parse_lint_info(doc, name, is_clippy)
+            res.append(info)
+            # reset searching parameters for next lint declared in the same file
+            doc_list = [""]
             lint_name = ""
         elif extraction_started and trimmed.startswith("///"):
             if len(trimmed) == 3:
@@ -110,8 +151,11 @@ def extract_lint_doc_and_name(text: str, start: str) -> (str, str):
     return res
 
 
-def parse_clippy_lint_info(doc: str, lint_name: str) -> LintInfoDetail:
-    html = mistune.markdown(doc, renderer=ClippyDocRenderer())
+def parse_lint_info(doc: str, lint_name: str, is_clippy: bool) -> LintInfoDetail:
+    if is_clippy:
+        html = mistune.markdown(doc, renderer=ClippyDocRenderer())
+    else:
+        html = mistune.markdown(doc, renderer=RustcDocRenderer())
     soup = BeautifulSoup(html, features="html.parser")
 
     # temp dict to store text after each corresponding header
@@ -127,16 +171,22 @@ def parse_clippy_lint_info(doc: str, lint_name: str) -> LintInfoDetail:
             text += sib.text
         res[heading.text] = text.strip()
     
+    return LintInfoDetail(
+        lint_name,
+        value_or_empty("Summary", res, lint_name),
+        value_or_empty("Example", res, lint_name),
+        value_or_empty("Instead", res, lint_name),
+        value_or_empty("Explanation", res, lint_name)
+    )
+
+
+def value_or_empty(key: str, map: dict, name="") -> str:
     try:
-        return LintInfoDetail(
-            lint_name,
-            res["Summary"],
-            res["Example"],
-            res["Instead"],
-            res["Explanation"]
-        )
-    except KeyError as ke:
-        err(f"failed to parse clippy lint info from html: {ke}")
+        return map[key]
+    except KeyError:
+        if name:
+            print("missing header '{}' for lint '{}'".format(key, name))
+        return ""
 
 
 def cli() -> ArgumentParser:
@@ -191,6 +241,7 @@ def main():
 
     info.clone_rust_src(args.branch, args.force)
     info.gather_lint_info()
+    print("total:", len(info.content))
 
 
 if __name__ == "__main__":

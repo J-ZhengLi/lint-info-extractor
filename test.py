@@ -37,100 +37,18 @@ declare_clippy_lint! {
 pub fn foo() {
     let a = 1 + 1;
 }
-
-declare_clippy_lint! {
-    /// ### What it does
-    /// Checks for casts of a function pointer to a numeric type not wide enough to
-    /// store address.
-    ///
-    /// ### Why is this bad?
-    /// Such a cast discards some bits of the function's address. If this is intended, it would be more
-    /// clearly expressed by casting to usize first, then casting the usize to the intended type (with
-    /// a comment) to perform the truncation.
-    ///
-    /// ### Example
-    /// ```rust
-    /// fn fn1() -> i16 {
-    ///     1
-    /// };
-    /// let _ = fn1 as i32;
-    /// ```
-    ///
-    /// Use instead:
-    /// ```rust
-    /// // Cast to usize first, then comment with the reason for the truncation
-    /// fn fn1() -> i16 {
-    ///     1
-    /// };
-    /// let fn_ptr = fn1 as usize;
-    /// let fn_ptr_truncated = fn_ptr as i32;
-    /// ```
-    #[clippy::version = "pre 1.29.0"]
-    pub FN_TO_NUMERIC_CAST_WITH_TRUNCATION,
-    style,
-    "casting a function pointer to a numeric type not wide enough to store the address"
-}
 """
-        res = run.extract_lint_doc_and_name(text, "declare_clippy_lint!")
-        self.assertEqual(
-            res,
-            [
-                (
-                    """### What it does
-Checks for casts of function pointers to something other than usize
-
-### Why is this bad?
-Casting a function pointer to anything other than usize/isize is not portable across
+        res = run.extract_lint_info_detail(text, True)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].name, "clippy::fn_to_numeric_cast")
+        self.assertEqual(res[0].summary, "Checks for casts of function pointers to something other than usize")
+        self.assertEqual(res[0].example, "fn fun() -> i32 { 1 }\nlet _ = fun as i64;")
+        self.assertEqual(res[0].instead, "# fn fun() -> i32 { 1 }\nlet _ = fun as usize;")
+        self.assertEqual(res[0].explanation, """Casting a function pointer to anything other than usize/isize is not portable across
 architectures, because you end up losing bits if the target type is too small or end up with a
 bunch of extra bits that waste space and add more instructions to the final binary than
 strictly necessary for the problem
-
-Casting to isize also doesn't make sense since there are no signed addresses.
-
-### Example
-```rust
-fn fun() -> i32 { 1 }
-let _ = fun as i64;
-```
-
-Use instead:
-```rust
-# fn fun() -> i32 { 1 }
-let _ = fun as usize;
-```""",
-                "fn_to_numeric_cast"
-                ),
-                (
-                    """### What it does
-Checks for casts of a function pointer to a numeric type not wide enough to
-store address.
-
-### Why is this bad?
-Such a cast discards some bits of the function's address. If this is intended, it would be more
-clearly expressed by casting to usize first, then casting the usize to the intended type (with
-a comment) to perform the truncation.
-
-### Example
-```rust
-fn fn1() -> i16 {
-    1
-};
-let _ = fn1 as i32;
-```
-
-Use instead:
-```rust
-// Cast to usize first, then comment with the reason for the truncation
-fn fn1() -> i16 {
-    1
-};
-let fn_ptr = fn1 as usize;
-let fn_ptr_truncated = fn_ptr as i32;
-```""",
-                "fn_to_numeric_cast_with_truncation"
-                )
-            ]
-        )
+Casting to isize also doesn't make sense since there are no signed addresses.""")
 
 
     def test_extract_rustc_lint_info(self):
@@ -162,77 +80,52 @@ declare_lint! {
     Deny,
     "invisible directionality-changing codepoints in comment"
 }"""
-        res = run.extract_lint_doc_and_name(text, "declare_lint!")
-        self.assertEqual(
-            res,
-            [
-                (
-                    """The `text_direction_codepoint_in_comment` lint detects Unicode codepoints in comments that
+        res = run.extract_lint_info_detail(text, False)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].name, "text_direction_codepoint_in_comment")
+        self.assertEqual(res[0].summary, """The text_direction_codepoint_in_comment lint detects Unicode codepoints in comments that
 change the visual representation of text on screen in a way that does not correspond to
-their on memory representation.
-
-### Example
-
-```rust,compile_fail
-#![deny(text_direction_codepoint_in_comment)]
+their on memory representation.""")
+        self.assertEqual(res[0].example, """#![deny(text_direction_codepoint_in_comment)]
 fn main() {
     println!("{:?}"); // '‮');
-}
-```
-
-{{produces}}
-
-### Explanation
-
-Unicode allows changing the visual flow of text on screen in order to support scripts that
+}""")
+        self.assertEqual(res[0].instead, "")
+        self.assertEqual(res[0].explanation, """Unicode allows changing the visual flow of text on screen in order to support scripts that
 are written right-to-left, but a specially crafted comment can make code that will be
 compiled appear to be part of a comment, depending on the software used to read the code.
 To avoid potential problems or confusion, such as in CVE-2021-42574, by default we deny
-their use.""",
-                    "text_direction_codepoint_in_comment"
-                )
-            ]
-        )
+their use.""")
 
 
     def test_parse_clippy_doc(self):
         doc_raw = """### What it does
-Checks for casts of function pointers to something other than usize
+Checks for transmutes from a float to an integer.
 
 ### Why is this bad?
-Casting a function pointer to anything other than usize/isize is not portable across
-architectures, because you end up losing bits if the target type is too small or end up with a
-bunch of extra bits that waste space and add more instructions to the final binary than
-strictly necessary for the problem
-
-Casting to isize also doesn't make sense since there are no signed addresses.
+Transmutes are dangerous and error-prone, whereas `to_bits` is intuitive
+and safe.
 
 ### Example
 ```rust
-fn fun() -> i32 { 1 }
-let _ = fun as i64;
-```
+unsafe {
+    let _: u32 = std::mem::transmute(1f32);
+}
 
-Use instead:
-
-```rust
-# fn fun() -> i32 { 1 }
-let _ = fun as usize;
+// should be:
+let _: u32 = 1f32.to_bits();
 ```"""
 
-        lint_name = "fn_to_numeric_cast"
-        info = run.parse_clippy_lint_info(doc_raw, lint_name)
+        lint_name = "transmute_float_to_int"
+        info = run.parse_lint_info(doc_raw, lint_name, True)
         self.assertEqual(info.name, lint_name)
-        self.assertEqual(info.summary, "Checks for casts of function pointers to something other than usize")
-        self.assertEqual(info.explanation, """Casting a function pointer to anything other than usize/isize is not portable across
-architectures, because you end up losing bits if the target type is too small or end up with a
-bunch of extra bits that waste space and add more instructions to the final binary than
-strictly necessary for the problem
-Casting to isize also doesn't make sense since there are no signed addresses.""")
-        self.assertEqual(info.example, """fn fun() -> i32 { 1 }
-let _ = fun as i64;""")
-        self.assertEqual(info.instead, """# fn fun() -> i32 { 1 }
-let _ = fun as usize;""")
+        self.assertEqual(info.summary, "Checks for transmutes from a float to an integer.")
+        self.assertEqual(info.explanation, """Transmutes are dangerous and error-prone, whereas to_bits is intuitive
+and safe.""")
+        self.assertEqual(info.example, """unsafe {
+    let _: u32 = std::mem::transmute(1f32);
+}""")
+        self.assertEqual(info.instead, "let _: u32 = 1f32.to_bits();")
 
 
     def test_translation(self):
