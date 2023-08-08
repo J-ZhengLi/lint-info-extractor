@@ -60,8 +60,8 @@ class LintInfo:
                     for line in cf.readlines():
                         if not line:
                             continue
-                        name, trans = line.split("@", 1)
-                        cached_dict[name] = trans.strip()
+                        name, summary, desc = line.split("@@@", 2)
+                        cached_dict[name] = (summary, desc)
             # update cache
             with open(cache_path, "w", encoding="utf8") as cf:
                 for cont in self.content:
@@ -69,16 +69,14 @@ class LintInfo:
                         print("using cached translation for lint '{}'".format(cont.name))
                         translated = cached_dict[cont.name]
                     else:
-                        print("translating summary for lint '{}'".format(cont.name))
-                        if cont.summary:
-                            # redundent newlines make translation less accurate
-                            _text = cont.summary.replace("\n", "")
-                            translated = translator.translate(_text)
-                        else:
-                            translated = ""
+                        print("translating lint '{}'".format(cont.name))
+                        summary = "" if not cont.summary else translator.translate(cont.summary.replace("\n", ""))
+                        explanation = "" if not cont.explanation else translator.translate(cont.explanation.replace("\n", ""))
+                        translated = (summary, explanation)
                     
-                    cont.summary = translated
-                    cf.write("{}@{}\n".format(cont.name, translated))
+                    cont.summary = translated[0]
+                    cont.explanation = translated[1]
+                    cf.write("{}@@@{}@@@{}\n".format(cont.name, translated[0], translated[1]))
 
 
     def clippy_lints_info(self):
