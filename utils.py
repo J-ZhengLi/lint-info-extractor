@@ -4,6 +4,10 @@ import sys
 
 import translators
 
+def script_dir_with(*paths) -> str:
+    return os.path.join(os.path.dirname(__file__), *paths)
+
+
 def err(*msg: str, code=1, separator=" "):
     print("\x1b[31;1merror\x1b[0m: {}".format(f"{separator}".join(msg)), file=sys.stderr)
     exit(code)
@@ -36,5 +40,6 @@ class Translator:
                 to_language=self.lang
             )
         except Exception as e:
-            err(f"unknown exception caught when translating text: {e}")
+            print(f"unknown exception caught when translating '{text}'")
+            raise e
 

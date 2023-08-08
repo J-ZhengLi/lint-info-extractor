@@ -2,19 +2,22 @@
 import subprocess
 import shutil
 import os
+import pkg_resources
 from itertools import chain
 from argparse import ArgumentParser
 from pathlib import Path
 
+import pandas as pd
 import mistune
 from bs4 import BeautifulSoup
 
 from renderers import ClippyDocRenderer, RustcDocRenderer
-from utils import err, ensure_cmd, ensure_path
+from utils import err, ensure_cmd, ensure_path, Translator, script_dir_with
 
 class LintInfo:
-    def __init__(self, lang: str, rust_dir=None, content=[]):
+    def __init__(self, lang: str, provider, rust_dir=None, content=[]):
         self.lang = lang
+        self.translation_provider = provider
         self.rust_dir = rust_dir
         self.content = content
 
@@ -34,8 +37,8 @@ class LintInfo:
             if branch:
                 args.extend(["-b", branch])
             subprocess.run(args).check_returncode()
-        except PermissionError as pe:
-            err(f"unable to remove `rust` directory due to lack of permission, try deleting it manually")
+        except PermissionError:
+            err("unable to remove `rust` directory due to lack of permission, try deleting it manually")
         except subprocess.SubprocessError as se:
             err(f"failed to clone rust repo: {se}")
         except Exception as ex:
@@ -45,6 +48,37 @@ class LintInfo:
     def gather_lint_info(self):
         self.content += self.clippy_lints_info()
         self.content += self.rustc_lints_info()
+
+        # translate if required
+        if self.lang and self.lang.lower() != "en":
+            cache_path = script_dir_with("temp", ".translation_cache-{}".format(self.lang))
+            translator = Translator(self.translation_provider, self.lang)
+            cached_dict = dict()
+            # load cache
+            if os.path.isfile(cache_path):
+                with open(cache_path, "r", encoding="utf8") as cf:
+                    for line in cf.readlines():
+                        if not line:
+                            continue
+                        name, trans = line.split("@", 1)
+                        cached_dict[name] = trans.strip()
+            # update cache
+            with open(cache_path, "w", encoding="utf8") as cf:
+                for cont in self.content:
+                    if cont.name in cached_dict:
+                        print("using cached translation for lint '{}'".format(cont.name))
+                        translated = cached_dict[cont.name]
+                    else:
+                        print("translating summary for lint '{}'".format(cont.name))
+                        if cont.summary:
+                            # redundent newlines make translation less accurate
+                            _text = cont.summary.replace("\n", "")
+                            translated = translator.translate(_text)
+                        else:
+                            translated = ""
+                    
+                    cont.summary = translated
+                    cf.write("{}@{}\n".format(cont.name, translated))
 
 
     def clippy_lints_info(self):
@@ -93,6 +127,40 @@ class LintInfo:
         for file in rs_files:
             info_details += _lint_info_from_file_(file, False)
         return info_details
+    
+
+    def export(self, path: str):
+        _, ext = os.path.splitext(path)
+        if ext == ".xlsx":
+            # convert self.content from list to dict
+            data = {
+                "Lint": [],
+                "Summary": [],
+                "Explanation": [],
+                "Example": [],
+                "How to fix": [],
+            }
+            try:
+                for det in self.content:
+                    data["Lint"].append(det.name)
+                    data["Summary"].append(det.summary)
+                    data["Explanation"].append(det.explanation)
+                    data["Example"].append(det.example)
+                    data["How to fix"].append(det.instead)
+
+                df = pd.DataFrame(data)
+                if "jinja2" in {pkg.key for pkg in pkg_resources.working_set}:
+                    print("applying dataframe styling")
+                    df.style.set_properties(**{'text-align': 'left'})
+                df.to_excel(path, sheet_name="all lints")
+            except KeyError as ke:
+                err(f"failed to convert lint data into dictionary: {ke}")
+            except IOError as io:
+                err(f"failed to write result: {io}")
+            except Exception as ex:
+                err(f"unknown error caught when outputing result: {ex}")
+        else:
+            err("unsupported output format:", ext)
 
 
 def _lint_info_from_file_(file, is_clippy) -> list:
@@ -144,8 +212,8 @@ def extract_lint_info_detail(text: str, is_clippy: bool) -> list:
                 doc_list.append("")
             else:
                 doc_list.append(trimmed.removeprefix("/// "))
-        elif extraction_started:
-            maybe_lint_name = trimmed.lstrip("pub ").rstrip(",")
+        elif extraction_started and not lint_name:
+            maybe_lint_name = trimmed.split(" ")[-1].rstrip(",")
             if maybe_lint_name.isupper():
                 lint_name = maybe_lint_name
     return res
@@ -213,10 +281,16 @@ def cli() -> ArgumentParser:
             be incorrect."
     )
     app.add_argument(
-        "--translator",
+        "--provider",
         action="store",
         help="Specify a translation service provider",
         default="baidu",
+    )
+    app.add_argument(
+        "-o", "--output",
+        action="store",
+        help="Set a local path for result export",
+        default="./result.xlsx"
     )
 
     subcommands = app.add_subparsers(title="subcommands")
@@ -236,12 +310,15 @@ def main():
 
     args = cli().parse_args()
 
-    dest_rust_dir = os.path.join(os.path.dirname(__file__), "rust")
-    info = LintInfo(args.lang, rust_dir=dest_rust_dir)
+    dest_rust_dir = script_dir_with("rust")
+    temp_dir = script_dir_with("temp")
+    if not os.path.isdir(temp_dir):
+        os.makedirs(temp_dir)
+    info = LintInfo(args.lang, provider=args.provider, rust_dir=dest_rust_dir)
 
     info.clone_rust_src(args.branch, args.force)
     info.gather_lint_info()
-    print("total:", len(info.content))
+    info.export(args.output)
 
 
 if __name__ == "__main__":
