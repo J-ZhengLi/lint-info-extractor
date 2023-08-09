@@ -1,4 +1,5 @@
 import mistune
+import re
 
 class ClippyDocRenderer(mistune.HTMLRenderer):
     """
@@ -38,6 +39,9 @@ class ClippyDocRenderer(mistune.HTMLRenderer):
     
 
     def block_code(self, code: str, info=None) -> str:
+        # get rid of code after "#", because rust uses it to hide inrelevent code
+        pat = re.compile(r"^#.*$", re.MULTILINE)
+        code = pat.sub("", code)
         # Some clippy lint doc using a comment to indicate the correct usage,
         # instead of a `### Instead` header, idk why... Therefore they need to be splitted
         splitter = ""
@@ -71,4 +75,12 @@ class RustcDocRenderer(mistune.HTMLRenderer):
         if "Example" in text:
             return "<h3>Example</h3>\n"
         return super().heading(text, level, **attrs)
+    
+
+    def block_code(self, code: str, info=None) -> str:
+        # get rid of code after "#", because rust uses it to hide inrelevent code
+        pat = re.compile(r"^#.*$", re.MULTILINE)
+        code = pat.sub("", code)
+
+        return super().block_code(code, info)
 
