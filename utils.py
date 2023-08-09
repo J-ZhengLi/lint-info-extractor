@@ -21,7 +21,7 @@ def ensure_cmd(cmd: str):
 
 def ensure_path(path: str, ext_msg=""):
     if not os.path.exists(path):
-        err("path does not exist,", ext_msg)
+        err(f"path specified at '{path}' does not exist,", ext_msg)
 
 
 class Translator:

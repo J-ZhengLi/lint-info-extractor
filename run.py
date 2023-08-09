@@ -3,6 +3,7 @@ import subprocess
 import shutil
 import os
 import pkg_resources
+import re
 from itertools import chain
 from argparse import ArgumentParser
 from pathlib import Path
@@ -144,6 +145,7 @@ class LintInfo:
             # convert self.content from list to dict
             data = {
                 "Lint": [],
+                "Former Name": [],
                 "Summary": [],
                 "Explanation": [],
                 "Example": [],
@@ -152,6 +154,7 @@ class LintInfo:
             try:
                 for det in self.content:
                     data["Lint"].append(det.name)
+                    data["Former Name"].append("\n".join(det.former_name))
                     data["Summary"].append(det.summary)
                     data["Explanation"].append(det.explanation)
                     data["Example"].append(det.example)
@@ -184,12 +187,13 @@ def _lint_info_from_file_(file, is_clippy) -> list:
         err(f"unknown error: {ex}")
 
 class LintInfoDetail:
-    def __init__(self, name: str, summary: str, example: str, instead: str, explanation: str):
+    def __init__(self, name: str, summary: str, example: str, instead: str, explanation: str, former_name: str):
         self.name = name
         self.summary = summary
         self.example = example
         self.instead = instead
         self.explanation = explanation
+        self.former_name = former_name
 
 
 def extract_lint_info_detail(text: str, is_clippy: bool) -> list:
@@ -247,14 +251,40 @@ def parse_lint_info(doc: str, lint_name: str, is_clippy: bool) -> LintInfoDetail
                 break
             text += sib.text
         res[heading.text] = text.strip()
+
+    former_names = get_lints_former_name()
     
     return LintInfoDetail(
         lint_name,
         value_or_empty("Summary", res, lint_name),
         value_or_empty("Example", res, lint_name),
         value_or_empty("Instead", res, lint_name),
-        value_or_empty("Explanation", res, lint_name)
+        value_or_empty("Explanation", res, lint_name),
+        "" if lint_name not in former_names else former_names[lint_name]
     )
+
+
+def get_lints_former_name() -> dict:
+    """
+    Get a dictionary of lint's current name as key, with its former name as value
+    """
+    # former names could be fetched from this file
+    rename_lints_file = script_dir_with("rust", "src", "tools", "clippy", "clippy_lints", "src", "renamed_lints.rs")
+    ensure_path(rename_lints_file)
+    result = dict()
+    cont = ""
+
+    with open(rename_lints_file, "r", encoding="utf8") as cf:
+        cont = cf.read()
+    
+    pat = r"\(\"(.*?)\", \"(.*?)\"\),"
+    pairs = re.findall(pat, cont)
+    for pair in pairs:
+        if pair[1] in result:
+            result[pair[1]].append(pair[0])
+        else:
+            result[pair[1]] = [pair[0]]
+    return result
 
 
 def value_or_empty(key: str, map: dict, name="") -> str:
