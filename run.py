@@ -51,32 +51,43 @@ class LintInfo:
 
         # translate if required
         if self.lang and self.lang.lower() != "en":
-            cache_path = script_dir_with("temp", ".translation_cache-{}".format(self.lang))
-            translator = Translator(self.translation_provider, self.lang)
-            cached_dict = dict()
-            # load cache
-            if os.path.isfile(cache_path):
-                with open(cache_path, "r", encoding="utf8") as cf:
-                    for line in cf.readlines():
-                        if not line:
-                            continue
-                        name, summary, desc = line.split("@@@", 2)
-                        cached_dict[name] = (summary, desc)
-            # update cache
-            with open(cache_path, "w", encoding="utf8") as cf:
-                for cont in self.content:
-                    if cont.name in cached_dict:
-                        print("using cached translation for lint '{}'".format(cont.name))
-                        translated = cached_dict[cont.name]
-                    else:
-                        print("translating lint '{}'".format(cont.name))
-                        summary = "" if not cont.summary else translator.translate(cont.summary.replace("\n", ""))
-                        explanation = "" if not cont.explanation else translator.translate(cont.explanation.replace("\n", ""))
-                        translated = (summary, explanation)
-                    
-                    cont.summary = translated[0]
-                    cont.explanation = translated[1]
-                    cf.write("{}@@@{}@@@{}\n".format(cont.name, translated[0], translated[1]))
+            cache_path = script_dir_with(
+                "temp",
+                ".translation_cache-{}-{}".format(self.translation_provider, self.lang)
+            )
+            whitelist = []
+            try:
+                with open(script_dir_with("example", "whitelist"), "r", encoding="utf8") as wf:
+                    whitelist = set(wf.read().strip().split(","))
+                translator = Translator(self.translation_provider, self.lang, whitelist=whitelist)
+                cached_dict = dict()
+                # load cache
+                if os.path.isfile(cache_path):
+                    with open(cache_path, "r", encoding="utf8") as cf:
+                        for line in cf.readlines():
+                            if not line:
+                                continue
+                            name, summary, desc = line.strip().split("@@@", 2)
+                            cached_dict[name] = (summary, desc)
+                # update cache
+                with open(cache_path, "w", encoding="utf8") as cf:
+                    for cont in self.content:
+                        if cont.name in cached_dict:
+                            print("using cached translation for lint '{}'".format(cont.name))
+                            translated = cached_dict[cont.name]
+                        else:
+                            print("translating lint '{}'".format(cont.name))
+                            summary = "" if not cont.summary else translator.translate(cont.summary.replace("\n", ""))
+                            explanation = "" if not cont.explanation else translator.translate(cont.explanation.replace("\n", ""))
+                            translated = (summary, explanation)
+                        
+                        cont.summary = translated[0]
+                        cont.explanation = translated[1]
+                        cf.write("{}@@@{}@@@{}\n".format(cont.name, translated[0], translated[1]))
+            except IOError as ie:
+                err(f"unable to translate lints info: {ie}")
+            except Exception as ex:
+                raise ex
 
 
     def clippy_lints_info(self):

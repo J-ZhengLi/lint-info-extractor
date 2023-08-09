@@ -1,6 +1,7 @@
 import shutil
 import os
 import sys
+import re
 
 import translators
 
@@ -24,21 +25,41 @@ def ensure_path(path: str, ext_msg=""):
 
 
 class Translator:
-    def __init__(self, provider: str, lang: str, use_cache=False):
+    def __init__(self, provider: str, lang: str, use_cache=False, whitelist={}):
         self.provider = provider
         self.lang = lang
         if use_cache:
             _ = translators.preaccelerate_and_speedtest()
+        if type(whitelist) == set:
+            self.whitelist = whitelist
+        else:
+            self.whitelist = set(whitelist)
 
 
-    def translate(self, text) -> str:
+    def translate(self, text: str) -> str:
+        filtered = []
+        # RIP performance
+        for word in text.split(" "):
+            if not word:
+                continue
+            if word in self.whitelist:
+                filtered.append("[__{}]".format(word))
+            else:
+                filtered.append(word)
+        filtered_text = " ".join(filtered)
         try:
-            return translators.translate_text(
-                text,
+            
+            translated = translators.translate_text(
+                filtered_text,
                 translator=self.provider,
                 from_language="en",
-                to_language=self.lang
+                to_language=self.lang,
+                if_ignore_limit_of_length=True,
             )
+            return re.sub(r"\[__([^\]]+)\]", r"\1", translated)
+        except KeyError:
+            print(f"failed to translate '{filtered_text}', returning the original string")
+            return text
         except Exception as e:
             print(f"unknown exception caught when translating '{text}'")
             raise e

@@ -136,6 +136,15 @@ and safe.""")
         translated = translator.translate(text)
         self.assertEqual(translated, """它基本上保证是未定义的行为。
 `UnsafeCell `是获得所考虑的可混叠数据的唯一方法""")
+        
+
+    def test_translation_skip(self):
+        whitelist = ["crate", "lint", "assert!"]
+        text = "this is a lint that checks assert! usage in every crate"
+        trans = utils.Translator("baidu", "zh", whitelist=whitelist)
+        translated = trans.translate(text)
+        # its not perfect, but it works
+        self.assertEqual(translated, "这是一个lint，它检查每个crate中的assert！使用情况")
 
 
 if __name__ == "__main__":
