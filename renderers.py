@@ -10,7 +10,7 @@ class ClippyDocRenderer(mistune.HTMLRenderer):
         # Why am I doing this!
         # HELP! I'm losing it
         # I NEED to find a better way... OR DO I?
-        if not text.endswith(":"):
+        if self._under_example is None or not self._under_example:
             return super().paragraph(text)
         lower_text = text.lower()
         could_be_correct_example = False
@@ -18,6 +18,7 @@ class ClippyDocRenderer(mistune.HTMLRenderer):
             "instead",
             "be written",
             "would be",
+            "could be",
             "you must",
         ]:
             if keyword in lower_text:
@@ -29,23 +30,25 @@ class ClippyDocRenderer(mistune.HTMLRenderer):
 
 
     def heading(self, text: str, level: int, **attrs) -> str:
+        self._under_example = False
         if text == "What it does":
             return "<h3>Summary</h3>\n"
         if "Why" in text:
             return "<h3>Explanation</h3>\n"
         if "Example" in text:
+            self._under_example = True
             return "<h3>Example</h3>\n"
         return super().heading(text, level, **attrs)
     
 
     def block_code(self, code: str, info=None) -> str:
-        # get rid of code after "#", because rust uses it to hide inrelevent code
-        pat = re.compile(r"^#.*$", re.MULTILINE)
+        # get rid of code after "# ", because rust uses it to hide inrelevent code
+        pat = re.compile(r"^# .*$", re.MULTILINE)
         code = pat.sub("", code)
         # Some clippy lint doc using a comment to indicate the correct usage,
         # instead of a `### Instead` header, idk why... Therefore they need to be splitted
         splitter = ""
-        for comment_spliter_keywords in [ "should be", "can be" ]:
+        for comment_spliter_keywords in [ "should be", "can be", "could be" ]:
             for line in code.splitlines():
                 if line.startswith("//") and comment_spliter_keywords in line:
                     splitter = line
@@ -78,8 +81,8 @@ class RustcDocRenderer(mistune.HTMLRenderer):
     
 
     def block_code(self, code: str, info=None) -> str:
-        # get rid of code after "#", because rust uses it to hide inrelevent code
-        pat = re.compile(r"^#.*$", re.MULTILINE)
+        # get rid of code after "# ", because rust uses it to hide inrelevent code
+        pat = re.compile(r"^# .*$", re.MULTILINE)
         code = pat.sub("", code)
 
         return super().block_code(code, info)
