@@ -1,5 +1,5 @@
 # lint-info-extractor
-(WIP) Extract information about every rust lints
+Extract information about every rust lints
 
 I don't know why... But apparently someone needs this.
 
